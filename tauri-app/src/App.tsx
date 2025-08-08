@@ -6,22 +6,16 @@ import {
   Cpu, 
   MemoryStick, 
   HardDrive, 
-  Wifi,
-  RefreshCw,
   Activity,
   Info,
   Thermometer,
-  TrendingUp,
   Zap,
   Users,
   Moon,
   Sun
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { RealtimeCharts } from './components/Charts';
-import { ProcessWindow } from './components/ProcessWindow';
-import { dataCache } from './services/dataCache';
+import { ProcessPage } from './components/ProcessPage';
 import './index.css';
 
 // Types
@@ -92,6 +86,7 @@ interface ProcessInfo {
   pid: number;
   cpu_usage: number;
   memory: number;
+  gpu_usage: number;
 }
 
 interface ChartDataPoint {
@@ -156,7 +151,7 @@ const ProgressBar: React.FC<{ value: number; max?: number; color?: string }> = (
                     "from-blue-500 to-blue-600";
   
   return (
-    <div className="progress-bar">
+    <div className={`w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 transition-colors duration-200`}>
       <motion.div
         initial={{ width: 0 }}
         animate={{ width: `${percentage}%` }}
@@ -184,21 +179,15 @@ const RealtimeMonitor: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
       setStats(basicResult);
       setExtendedStats(extendedResult);
 
-      // Ajouter au graphique
-      const avgTemp = extendedResult.temperatures.length > 0 
-        ? extendedResult.temperatures.reduce((acc, temp) => acc + temp.temperature, 0) / extendedResult.temperatures.length
-        : undefined;
-
       const newDataPoint: ChartDataPoint = {
         timestamp: new Date(extendedResult.timestamp).toISOString(),
         cpu: extendedResult.cpu_usage,
         memory: extendedResult.memory_usage,
-        temperature: avgTemp
       };
 
       setChartData(prev => {
         const newData = [...prev, newDataPoint];
-        return newData.slice(-20); // Garder les 20 derniers points
+        return newData.slice(-20);
       });
 
     } catch (error) {
@@ -216,11 +205,13 @@ const RealtimeMonitor: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
 
   if (!stats || !extendedStats) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {[1, 2, 3, 4, 5, 6].map(i => (
-          <div key={i} className="metric-card animate-pulse">
-            <div className="h-4 bg-gray-200 rounded mb-4"></div>
-            <div className="h-3 bg-gray-200 rounded"></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className={`backdrop-blur-sm rounded-xl border shadow-lg p-6 animate-pulse transition-colors duration-200 ${
+            isDarkMode ? 'bg-gray-800/50 border-gray-700/50' : 'bg-white/50 border-white/50'
+          }`}>
+            <div className={`h-4 rounded mb-4 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
+            <div className={`h-3 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
           </div>
         ))}
       </div>
@@ -228,115 +219,103 @@ const RealtimeMonitor: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
   }
 
   return (
-      <div className="space-y-8">
-        {/* Métriques principales */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <MetricCard title="Processeur" icon={<Cpu size={20} />} isDarkMode={isDarkMode}>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className={`text-sm font-medium transition-colors duration-200 ${
-                  isDarkMode ? 'text-gray-400' : 'text-gray-600'
-                }`}>Utilisation</span>
-                <span className={`text-lg font-bold transition-colors duration-200 ${
-                  isDarkMode ? 'text-gray-200' : 'text-gray-800'
-                }`}>
-                  {extendedStats.cpu_usage.toFixed(1)}%
-                </span>
-              </div>
-              <ProgressBar 
-                value={extendedStats.cpu_usage} 
-                color={extendedStats.cpu_usage > 80 ? "red" : extendedStats.cpu_usage > 60 ? "yellow" : "blue"} 
-              />
-            </div>
-          </MetricCard>
-
-          <MetricCard title="Mémoire" icon={<MemoryStick size={20} />} isDarkMode={isDarkMode}>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className={`text-sm font-medium transition-colors duration-200 ${
-                  isDarkMode ? 'text-gray-400' : 'text-gray-600'
-                }`}>Utilisation</span>
-                <span className={`text-lg font-bold transition-colors duration-200 ${
-                  isDarkMode ? 'text-gray-200' : 'text-gray-800'
-                }`}>
-                  {extendedStats.memory_usage.toFixed(1)}%
-                </span>
-              </div>
-              <ProgressBar 
-                value={extendedStats.memory_usage} 
-                color={extendedStats.memory_usage > 80 ? "red" : extendedStats.memory_usage > 60 ? "yellow" : "blue"} 
-              />
-              <div className={`text-sm transition-colors duration-200 ${
+    <div className="space-y-8">
+      {/* Métriques principales */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <MetricCard title="Processeur" icon={<Cpu size={20} />} isDarkMode={isDarkMode}>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className={`text-sm font-medium transition-colors duration-200 ${
                 isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Utilisation</span>
+              <span className={`text-lg font-bold transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
               }`}>
-                {extendedStats.memory_used_gb.toFixed(1)} GB / {extendedStats.memory_total_gb.toFixed(1)} GB
-              </div>
+                {extendedStats.cpu_usage.toFixed(1)}%
+              </span>
             </div>
-          </MetricCard>
+            <ProgressBar 
+              value={extendedStats.cpu_usage} 
+              color={extendedStats.cpu_usage > 80 ? "red" : extendedStats.cpu_usage > 60 ? "yellow" : "blue"} 
+            />
+          </div>
+        </MetricCard>
 
-          {extendedStats.temperatures.length > 0 && (
-            <MetricCard title="Température" icon={<Thermometer size={20} />} isDarkMode={isDarkMode}>
-              <div className="space-y-2">
-                {extendedStats.temperatures.slice(0, 2).map((temp, index) => (
-                  <div key={index} className="flex justify-between items-center">
-                    <span className={`text-sm font-medium truncate transition-colors duration-200 ${
-                      isDarkMode ? 'text-gray-400' : 'text-gray-600'
-                    }`}>
-                      {temp.component.replace(/^.*\\/, '').substring(0, 12)}
-                    </span>
-                    <span className={`text-sm font-bold ${
-                      temp.temperature > 80 ? 'text-red-500' : 
-                      temp.temperature > 65 ? 'text-yellow-500' : 'text-green-500'
-                    }`}>
-                      {temp.temperature.toFixed(1)}°C
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </MetricCard>
-          )}
+        <MetricCard title="Mémoire" icon={<MemoryStick size={20} />} isDarkMode={isDarkMode}>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className={`text-sm font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Utilisation</span>
+              <span className={`text-lg font-bold transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>
+                {extendedStats.memory_usage.toFixed(1)}%
+              </span>
+            </div>
+            <ProgressBar 
+              value={extendedStats.memory_usage} 
+              color={extendedStats.memory_usage > 80 ? "red" : extendedStats.memory_usage > 60 ? "yellow" : "blue"} 
+            />
+            <div className={`text-sm transition-colors duration-200 ${
+              isDarkMode ? 'text-gray-400' : 'text-gray-600'
+            }`}>
+              {extendedStats.memory_used_gb.toFixed(1)} GB / {extendedStats.memory_total_gb.toFixed(1)} GB
+            </div>
+          </div>
+        </MetricCard>
 
-          <MetricCard title="Processus Actifs" icon={<Zap size={20} />} isDarkMode={isDarkMode}>
+        {extendedStats.temperatures.length > 0 && (
+          <MetricCard title="Température" icon={<Thermometer size={20} />} isDarkMode={isDarkMode}>
             <div className="space-y-2">
-              {extendedStats.top_processes.slice(0, 3).map((proc, index) => (
+              {extendedStats.temperatures.slice(0, 2).map((temp, index) => (
                 <div key={index} className="flex justify-between items-center">
                   <span className={`text-sm font-medium truncate transition-colors duration-200 ${
                     isDarkMode ? 'text-gray-400' : 'text-gray-600'
                   }`}>
-                    {proc.name.length > 12 ? proc.name.substring(0, 12) + '...' : proc.name}
+                    {temp.component.replace(/^.*\\/, '').substring(0, 12)}
                   </span>
-                  <span className={`text-sm font-bold transition-colors duration-200 ${
-                    isDarkMode ? 'text-gray-200' : 'text-gray-800'
+                  <span className={`text-sm font-bold ${
+                    temp.temperature > 80 ? 'text-red-500' : 
+                    temp.temperature > 65 ? 'text-yellow-500' : 'text-green-500'
                   }`}>
-                    {proc.cpu_usage.toFixed(1)}%
+                    {temp.temperature.toFixed(1)}°C
                   </span>
                 </div>
               ))}
             </div>
           </MetricCard>
-        </div>      {/* Graphiques */}
-      <RealtimeCharts data={chartData} />
+        )}
 
-      {/* Activité réseau */}
-      {Object.keys(extendedStats.network_activity).length > 0 && (
-        <MetricCard 
-          title="Activité Réseau" 
-          icon={<Wifi size={20} />}
-          className="lg:col-span-2"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {Object.entries(extendedStats.network_activity).slice(0, 4).map(([name, [received, transmitted]], index) => (
-              <div key={index} className="p-4 bg-gray-50 rounded-lg">
-                <div className="font-medium text-gray-800 mb-2">{name}</div>
-                <div className="flex justify-between text-sm text-gray-600">
-                  <span>↓ {formatBytes(received)}</span>
-                  <span>↑ {formatBytes(transmitted)}</span>
-                </div>
+        <MetricCard title="Processus Actifs" icon={<Zap size={20} />} isDarkMode={isDarkMode}>
+          <div className="space-y-2">
+            {extendedStats.top_processes.slice(0, 3).map((proc, index) => (
+              <div key={index} className="flex justify-between items-center">
+                <span className={`text-sm font-medium truncate transition-colors duration-200 ${
+                  isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                }`}>
+                  {proc.name.length > 12 ? proc.name.substring(0, 12) + '...' : proc.name}
+                </span>
+                <span className={`text-sm font-bold transition-colors duration-200 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-800'
+                }`}>
+                  {proc.cpu_usage.toFixed(1)}%
+                </span>
               </div>
             ))}
+            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+              <div className={`text-xs text-center transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-500' : 'text-gray-500'
+              }`}>
+                Voir l'onglet "Processus" pour plus de détails
+              </div>
+            </div>
           </div>
         </MetricCard>
-      )}
+      </div>
+
+      {/* Graphiques */}
+      <RealtimeCharts data={chartData} />
     </div>
   );
 };
@@ -377,11 +356,13 @@ const SystemOverview: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {[1, 2, 3, 4].map(i => (
-          <div key={i} className="metric-card animate-pulse">
-            <div className="h-4 bg-gray-200 rounded mb-4"></div>
+          <div key={i} className={`backdrop-blur-sm rounded-xl border shadow-lg p-6 animate-pulse transition-colors duration-200 ${
+            isDarkMode ? 'bg-gray-800/50 border-gray-700/50' : 'bg-white/50 border-white/50'
+          }`}>
+            <div className={`h-4 rounded mb-4 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
             <div className="space-y-2">
-              <div className="h-3 bg-gray-200 rounded"></div>
-              <div className="h-3 bg-gray-200 rounded w-3/4"></div>
+              <div className={`h-3 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
+              <div className={`h-3 rounded w-3/4 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
             </div>
           </div>
         ))}
@@ -565,9 +546,8 @@ const SystemOverview: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
 };
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'overview' | 'charts'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'overview' | 'processes'>('monitor');
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    // Définir le thème sombre par défaut
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : true;
   });
@@ -581,7 +561,6 @@ const App: React.FC = () => {
     }
   }, [isDarkMode]);
 
-  // Initialize dark mode on first load
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
@@ -662,6 +641,19 @@ const App: React.FC = () => {
             <Info size={18} />
             Détails Hardware
           </button>
+          <button
+            onClick={() => setActiveTab('processes')}
+            className={`px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 ${
+              activeTab === 'processes'
+                ? 'bg-blue-500 text-white shadow-md'
+                : isDarkMode 
+                  ? 'text-gray-300 hover:text-blue-400 hover:bg-gray-700'
+                  : 'text-gray-600 hover:text-blue-500 hover:bg-blue-50'
+            }`}
+          >
+            <Users size={18} />
+            Processus
+          </button>
         </nav>
       </div>
 
@@ -674,7 +666,9 @@ const App: React.FC = () => {
           exit={{ opacity: 0, x: -20 }}
           transition={{ duration: 0.3 }}
         >
-          {activeTab === 'monitor' ? <RealtimeMonitor isDarkMode={isDarkMode} /> : <SystemOverview isDarkMode={isDarkMode} />}
+          {activeTab === 'monitor' && <RealtimeMonitor isDarkMode={isDarkMode} />}
+          {activeTab === 'overview' && <SystemOverview isDarkMode={isDarkMode} />}
+          {activeTab === 'processes' && <ProcessPage isDarkMode={isDarkMode} />}
         </motion.div>
       </main>
     </div>

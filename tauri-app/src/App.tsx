@@ -165,7 +165,7 @@ const ProgressBar: React.FC<{ value: number; max?: number; color?: string }> = (
 const RealtimeMonitor: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
   const [stats, setStats] = useState<RealtimeStats | null>(null);
   const [extendedStats, setExtendedStats] = useState<ExtendedRealtimeStats | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [, setIsLoading] = useState(false);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
 
   const fetchRealtimeStats = async () => {

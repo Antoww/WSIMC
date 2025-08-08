@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { motion } from 'framer-motion';
-import { Activity, Users } from 'lucide-react';
+import { Activity } from 'lucide-react';
 
 interface ProcessInfo {
   name: string;

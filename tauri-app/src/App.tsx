@@ -9,8 +9,19 @@ import {
   Wifi,
   RefreshCw,
   Activity,
-  Info
+  Info,
+  Thermometer,
+  TrendingUp,
+  Zap,
+  Users,
+  Moon,
+  Sun
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import { RealtimeCharts } from './components/Charts';
+import { ProcessWindow } from './components/ProcessWindow';
+import { dataCache } from './services/dataCache';
 import './index.css';
 
 // Types
@@ -58,6 +69,38 @@ interface RealtimeStats {
   memory_total_gb: number;
 }
 
+interface ExtendedRealtimeStats {
+  cpu_usage: number;
+  memory_usage: number;
+  memory_used_gb: number;
+  memory_total_gb: number;
+  temperatures: TemperatureInfo[];
+  network_activity: Record<string, [number, number]>;
+  top_processes: ProcessInfo[];
+  timestamp: string;
+}
+
+interface TemperatureInfo {
+  component: string;
+  temperature: number;
+  max_temperature?: number;
+  critical_temperature?: number;
+}
+
+interface ProcessInfo {
+  name: string;
+  pid: number;
+  cpu_usage: number;
+  memory: number;
+}
+
+interface ChartDataPoint {
+  timestamp: string;
+  cpu: number;
+  memory: number;
+  temperature?: number;
+}
+
 // Utility functions
 const formatBytes = (bytes: number): string => {
   const gb = bytes / (1024 ** 3);
@@ -77,17 +120,26 @@ const MetricCard: React.FC<{
   icon: React.ReactNode;
   children: React.ReactNode;
   className?: string;
-}> = ({ title, icon, children, className = "" }) => (
+  isDarkMode?: boolean;
+}> = ({ title, icon, children, className = "", isDarkMode = false }) => (
   <motion.div
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
-    className={`metric-card ${className}`}
+    className={`backdrop-blur-sm rounded-xl border shadow-lg p-6 transition-colors duration-200 ${
+      isDarkMode 
+        ? 'bg-gray-800/50 border-gray-700/50' 
+        : 'bg-white/50 border-white/50'
+    } ${className}`}
   >
     <div className="flex items-center gap-3 mb-4">
-      <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
+      <div className={`p-2 rounded-lg transition-colors duration-200 ${
+        isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-50 text-blue-600'
+      }`}>
         {icon}
       </div>
-      <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
+      <h3 className={`text-lg font-semibold transition-colors duration-200 ${
+        isDarkMode ? 'text-gray-200' : 'text-gray-800'
+      }`}>{title}</h3>
     </div>
     {children}
   </motion.div>
@@ -115,15 +167,40 @@ const ProgressBar: React.FC<{ value: number; max?: number; color?: string }> = (
   );
 };
 
-const RealtimeMonitor: React.FC = () => {
+const RealtimeMonitor: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
   const [stats, setStats] = useState<RealtimeStats | null>(null);
+  const [extendedStats, setExtendedStats] = useState<ExtendedRealtimeStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
 
   const fetchRealtimeStats = async () => {
     try {
       setIsLoading(true);
-      const result = await invoke<RealtimeStats>('get_real_time_stats');
-      setStats(result);
+      const [basicResult, extendedResult] = await Promise.all([
+        invoke<RealtimeStats>('get_real_time_stats'),
+        invoke<ExtendedRealtimeStats>('get_extended_realtime_stats')
+      ]);
+      
+      setStats(basicResult);
+      setExtendedStats(extendedResult);
+
+      // Ajouter au graphique
+      const avgTemp = extendedResult.temperatures.length > 0 
+        ? extendedResult.temperatures.reduce((acc, temp) => acc + temp.temperature, 0) / extendedResult.temperatures.length
+        : undefined;
+
+      const newDataPoint: ChartDataPoint = {
+        timestamp: new Date(extendedResult.timestamp).toISOString(),
+        cpu: extendedResult.cpu_usage,
+        memory: extendedResult.memory_usage,
+        temperature: avgTemp
+      };
+
+      setChartData(prev => {
+        const newData = [...prev, newDataPoint];
+        return newData.slice(-20); // Garder les 20 derniers points
+      });
+
     } catch (error) {
       console.error('Error fetching realtime stats:', error);
     } finally {
@@ -133,14 +210,14 @@ const RealtimeMonitor: React.FC = () => {
 
   useEffect(() => {
     fetchRealtimeStats();
-    const interval = setInterval(fetchRealtimeStats, 2000);
+    const interval = setInterval(fetchRealtimeStats, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  if (!stats) {
+  if (!stats || !extendedStats) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {[1, 2].map(i => (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[1, 2, 3, 4, 5, 6].map(i => (
           <div key={i} className="metric-card animate-pulse">
             <div className="h-4 bg-gray-200 rounded mb-4"></div>
             <div className="h-3 bg-gray-200 rounded"></div>
@@ -151,44 +228,120 @@ const RealtimeMonitor: React.FC = () => {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <MetricCard title="Processeur" icon={<Cpu size={20} />}>
-        <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <span className="text-sm font-medium text-gray-600">Utilisation</span>
-            <span className="text-lg font-bold text-gray-800">
-              {stats.cpu_usage.toFixed(1)}%
-            </span>
-          </div>
-          <ProgressBar 
-            value={stats.cpu_usage} 
-            color={stats.cpu_usage > 80 ? "red" : stats.cpu_usage > 60 ? "yellow" : "blue"} 
-          />
-        </div>
-      </MetricCard>
+      <div className="space-y-8">
+        {/* Métriques principales */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <MetricCard title="Processeur" icon={<Cpu size={20} />} isDarkMode={isDarkMode}>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className={`text-sm font-medium transition-colors duration-200 ${
+                  isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                }`}>Utilisation</span>
+                <span className={`text-lg font-bold transition-colors duration-200 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-800'
+                }`}>
+                  {extendedStats.cpu_usage.toFixed(1)}%
+                </span>
+              </div>
+              <ProgressBar 
+                value={extendedStats.cpu_usage} 
+                color={extendedStats.cpu_usage > 80 ? "red" : extendedStats.cpu_usage > 60 ? "yellow" : "blue"} 
+              />
+            </div>
+          </MetricCard>
 
-      <MetricCard title="Mémoire" icon={<MemoryStick size={20} />}>
-        <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <span className="text-sm font-medium text-gray-600">Utilisation</span>
-            <span className="text-lg font-bold text-gray-800">
-              {stats.memory_usage.toFixed(1)}%
-            </span>
+          <MetricCard title="Mémoire" icon={<MemoryStick size={20} />} isDarkMode={isDarkMode}>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className={`text-sm font-medium transition-colors duration-200 ${
+                  isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                }`}>Utilisation</span>
+                <span className={`text-lg font-bold transition-colors duration-200 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-800'
+                }`}>
+                  {extendedStats.memory_usage.toFixed(1)}%
+                </span>
+              </div>
+              <ProgressBar 
+                value={extendedStats.memory_usage} 
+                color={extendedStats.memory_usage > 80 ? "red" : extendedStats.memory_usage > 60 ? "yellow" : "blue"} 
+              />
+              <div className={`text-sm transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                {extendedStats.memory_used_gb.toFixed(1)} GB / {extendedStats.memory_total_gb.toFixed(1)} GB
+              </div>
+            </div>
+          </MetricCard>
+
+          {extendedStats.temperatures.length > 0 && (
+            <MetricCard title="Température" icon={<Thermometer size={20} />} isDarkMode={isDarkMode}>
+              <div className="space-y-2">
+                {extendedStats.temperatures.slice(0, 2).map((temp, index) => (
+                  <div key={index} className="flex justify-between items-center">
+                    <span className={`text-sm font-medium truncate transition-colors duration-200 ${
+                      isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                    }`}>
+                      {temp.component.replace(/^.*\\/, '').substring(0, 12)}
+                    </span>
+                    <span className={`text-sm font-bold ${
+                      temp.temperature > 80 ? 'text-red-500' : 
+                      temp.temperature > 65 ? 'text-yellow-500' : 'text-green-500'
+                    }`}>
+                      {temp.temperature.toFixed(1)}°C
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </MetricCard>
+          )}
+
+          <MetricCard title="Processus Actifs" icon={<Zap size={20} />} isDarkMode={isDarkMode}>
+            <div className="space-y-2">
+              {extendedStats.top_processes.slice(0, 3).map((proc, index) => (
+                <div key={index} className="flex justify-between items-center">
+                  <span className={`text-sm font-medium truncate transition-colors duration-200 ${
+                    isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                  }`}>
+                    {proc.name.length > 12 ? proc.name.substring(0, 12) + '...' : proc.name}
+                  </span>
+                  <span className={`text-sm font-bold transition-colors duration-200 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-800'
+                  }`}>
+                    {proc.cpu_usage.toFixed(1)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </MetricCard>
+        </div>      {/* Graphiques */}
+      <RealtimeCharts data={chartData} />
+
+      {/* Activité réseau */}
+      {Object.keys(extendedStats.network_activity).length > 0 && (
+        <MetricCard 
+          title="Activité Réseau" 
+          icon={<Wifi size={20} />}
+          className="lg:col-span-2"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Object.entries(extendedStats.network_activity).slice(0, 4).map(([name, [received, transmitted]], index) => (
+              <div key={index} className="p-4 bg-gray-50 rounded-lg">
+                <div className="font-medium text-gray-800 mb-2">{name}</div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>↓ {formatBytes(received)}</span>
+                  <span>↑ {formatBytes(transmitted)}</span>
+                </div>
+              </div>
+            ))}
           </div>
-          <ProgressBar 
-            value={stats.memory_usage} 
-            color={stats.memory_usage > 80 ? "red" : stats.memory_usage > 60 ? "yellow" : "blue"} 
-          />
-          <div className="text-sm text-gray-600">
-            {stats.memory_used_gb.toFixed(1)} GB / {stats.memory_total_gb.toFixed(1)} GB
-          </div>
-        </div>
-      </MetricCard>
+        </MetricCard>
+      )}
     </div>
   );
 };
 
-const SystemOverview: React.FC = () => {
+const SystemOverview: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => {
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [cpuInfo, setCpuInfo] = useState<CpuInfo | null>(null);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfo | null>(null);
@@ -240,23 +393,39 @@ const SystemOverview: React.FC = () => {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* System Info */}
       {systemInfo && (
-        <MetricCard title="Informations Système" icon={<Monitor size={20} />}>
+        <MetricCard title="Informations Système" icon={<Monitor size={20} />} isDarkMode={isDarkMode}>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-600">Système:</span>
-              <span className="font-medium">{systemInfo.name}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Système:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{systemInfo.name}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Version:</span>
-              <span className="font-medium">{systemInfo.os_version}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Version:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{systemInfo.os_version}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Nom PC:</span>
-              <span className="font-medium">{systemInfo.hostname}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Nom PC:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{systemInfo.hostname}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Uptime:</span>
-              <span className="font-medium">{formatUptime(systemInfo.uptime)}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Uptime:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{formatUptime(systemInfo.uptime)}</span>
             </div>
           </div>
         </MetricCard>
@@ -264,19 +433,37 @@ const SystemOverview: React.FC = () => {
 
       {/* CPU Info */}
       {cpuInfo && (
-        <MetricCard title="Processeur" icon={<Cpu size={20} />}>
+        <MetricCard title="Processeur" icon={<Cpu size={20} />} isDarkMode={isDarkMode}>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-600">Modèle:</span>
-              <span className="font-medium text-right">{cpuInfo.brand}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Modèle:</span>
+              <span className={`font-medium text-right transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{cpuInfo.brand}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Cœurs:</span>
-              <span className="font-medium">{cpuInfo.cores} ({cpuInfo.physical_cores} physiques)</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Utilisation:</span>
+              <span className="font-medium text-blue-400">{cpuInfo.usage.toFixed(1)}%</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Fréquence:</span>
-              <span className="font-medium">{cpuInfo.frequency} MHz</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Cœurs:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{cpuInfo.cores} ({cpuInfo.physical_cores} physiques)</span>
+            </div>
+            <div className="flex justify-between">
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Fréquence:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{cpuInfo.frequency} MHz</span>
             </div>
           </div>
         </MetricCard>
@@ -284,23 +471,52 @@ const SystemOverview: React.FC = () => {
 
       {/* Memory Info */}
       {memoryInfo && (
-        <MetricCard title="Mémoire" icon={<MemoryStick size={20} />}>
+        <MetricCard title="Mémoire" icon={<MemoryStick size={20} />} isDarkMode={isDarkMode}>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-600">Total:</span>
-              <span className="font-medium">{formatBytes(memoryInfo.total)}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Utilisation:</span>
+              <span className="font-medium text-blue-400">{memoryInfo.usage_percent.toFixed(1)}%</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Utilisée:</span>
-              <span className="font-medium">{formatBytes(memoryInfo.used)}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Total:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{formatBytes(memoryInfo.total)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Disponible:</span>
-              <span className="font-medium">{formatBytes(memoryInfo.available)}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Utilisée:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{formatBytes(memoryInfo.used)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Swap:</span>
-              <span className="font-medium">{formatBytes(memoryInfo.swap_total)}</span>
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Disponible:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>{formatBytes(memoryInfo.available)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className={`transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>Swap:</span>
+              <span className={`font-medium transition-colors duration-200 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>
+                {formatBytes(memoryInfo.swap_total)}
+                {memoryInfo.swap_total > 0 && memoryInfo.swap_used > 0 && (
+                  <span className="text-blue-400 ml-2">
+                    ({((memoryInfo.swap_used / memoryInfo.swap_total) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </span>
             </div>
           </div>
         </MetricCard>
@@ -312,16 +528,30 @@ const SystemOverview: React.FC = () => {
           title="Stockage" 
           icon={<HardDrive size={20} />}
           className="lg:col-span-2"
+          isDarkMode={isDarkMode}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {diskInfo.map((disk, index) => (
-              <div key={index} className="p-4 bg-gray-50 rounded-lg">
+              <div key={index} className={`p-4 rounded-lg transition-colors duration-200 ${
+                isDarkMode ? 'bg-gray-700/50' : 'bg-gray-50'
+              }`}>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="font-medium text-gray-800">{disk.mount_point}</span>
-                  <span className="text-sm text-gray-600">{disk.file_system}</span>
+                  <span className={`font-medium transition-colors duration-200 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-800'
+                  }`}>{disk.mount_point}</span>
+                  <span className={`text-sm transition-colors duration-200 ${
+                    isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                  }`}>{disk.file_system}</span>
+                </div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-medium text-blue-400">
+                    {disk.usage_percent.toFixed(1)}% utilisé
+                  </span>
                 </div>
                 <ProgressBar value={disk.usage_percent} />
-                <div className="flex justify-between text-xs text-gray-600 mt-1">
+                <div className={`flex justify-between text-xs mt-1 transition-colors duration-200 ${
+                  isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                }`}>
                   <span>{formatBytes(disk.used_space)} utilisé</span>
                   <span>{formatBytes(disk.total_space)} total</span>
                 </div>
@@ -335,46 +565,98 @@ const SystemOverview: React.FC = () => {
 };
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'overview'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'overview' | 'charts'>('monitor');
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    // Définir le thème sombre par défaut
+    const saved = localStorage.getItem('darkMode');
+    return saved ? JSON.parse(saved) : true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
+  // Initialize dark mode on first load
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    setIsDarkMode(!isDarkMode);
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <div className={`min-h-screen transition-colors duration-200 ${
+      isDarkMode 
+        ? 'bg-gradient-to-br from-gray-900 to-gray-800' 
+        : 'bg-gradient-to-br from-slate-50 to-blue-50'
+    }`}>
       {/* Header */}
       <motion.header 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-card rounded-none border-0 border-b border-white/20 p-6 mb-8"
+        className={`backdrop-blur-sm rounded-none border-0 border-b p-6 mb-8 transition-colors duration-200 ${
+          isDarkMode 
+            ? 'bg-gray-800/80 border-gray-700/20' 
+            : 'bg-white/80 border-white/20'
+        }`}
       >
-        <div className="flex items-center justify-center gap-4">
-          <div className="p-3 bg-blue-500 rounded-full text-white">
-            <Monitor size={32} />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center justify-center gap-4 flex-1">
+            <div className="p-3 bg-blue-500 rounded-full text-white">
+              <Monitor size={32} />
+            </div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
+              What's In My Computer?
+            </h1>
           </div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
-            What's In My Computer?
-          </h1>
+          <button
+            onClick={toggleTheme}
+            className={`p-3 rounded-full transition-all duration-200 ${
+              isDarkMode 
+                ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400' 
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+            }`}
+            title={isDarkMode ? 'Mode clair' : 'Mode sombre'}
+          >
+            {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
         </div>
       </motion.header>
 
       {/* Navigation */}
       <div className="container mx-auto px-6 mb-8">
-        <nav className="flex gap-2 p-1 bg-white/80 backdrop-blur-sm rounded-xl shadow-lg w-fit mx-auto">
+        <nav className={`flex gap-2 p-1 backdrop-blur-sm rounded-xl shadow-lg w-fit mx-auto transition-colors duration-200 ${
+          isDarkMode ? 'bg-gray-800/80' : 'bg-white/80'
+        }`}>
           <button
             onClick={() => setActiveTab('monitor')}
             className={`px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 ${
               activeTab === 'monitor'
                 ? 'bg-blue-500 text-white shadow-md'
-                : 'text-gray-600 hover:text-blue-500 hover:bg-blue-50'
+                : isDarkMode 
+                  ? 'text-gray-300 hover:text-blue-400 hover:bg-gray-700'
+                  : 'text-gray-600 hover:text-blue-500 hover:bg-blue-50'
             }`}
           >
             <Activity size={18} />
-            Monitoring
+            Monitoring Avancé
           </button>
           <button
             onClick={() => setActiveTab('overview')}
             className={`px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 ${
               activeTab === 'overview'
                 ? 'bg-blue-500 text-white shadow-md'
-                : 'text-gray-600 hover:text-blue-500 hover:bg-blue-50'
+                : isDarkMode 
+                  ? 'text-gray-300 hover:text-blue-400 hover:bg-gray-700'
+                  : 'text-gray-600 hover:text-blue-500 hover:bg-blue-50'
             }`}
           >
             <Info size={18} />
@@ -392,7 +674,7 @@ const App: React.FC = () => {
           exit={{ opacity: 0, x: -20 }}
           transition={{ duration: 0.3 }}
         >
-          {activeTab === 'monitor' ? <RealtimeMonitor /> : <SystemOverview />}
+          {activeTab === 'monitor' ? <RealtimeMonitor isDarkMode={isDarkMode} /> : <SystemOverview isDarkMode={isDarkMode} />}
         </motion.div>
       </main>
     </div>
